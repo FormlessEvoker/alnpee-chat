@@ -36,4 +36,22 @@ defmodule Chat.ProtocolTest do
       assert :error == Chat.Protocol.decode_message(<<0x03, "rest">>)
     end
   end
+
+  describe "encode_message/1" do
+    test "can encode Register messages" do
+      message = %Register{username: "meg"}
+
+      iodata = Chat.Protocol.encode_message(message)
+
+      assert <<0x01, 0x00, 0x03, "meg">> == IO.iodata_to_binary(iodata)
+    end
+
+    test "can encode Broadcast messages" do
+      message = %Broadcast{from_username: "meg", contents: "hi"}
+
+      iodata = Chat.Protocol.encode_message(message)
+
+      assert <<0x02, 0x00, 0x03, "meg", 0x00, 0x02, "hi">> == IO.iodata_to_binary(iodata)
+    end
+  end
 end
