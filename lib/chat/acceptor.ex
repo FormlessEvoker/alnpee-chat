@@ -4,6 +4,7 @@ defmodule Chat.Acceptor do
   """
 
   use GenServer
+  require Logger
 
   defstruct [:listen_socket, :supervisor]
 
@@ -34,6 +35,31 @@ defmodule Chat.Acceptor do
 
       {:error, reason} ->
         {:stop, reason}
+    end
+  end
+
+  @impl true
+  def handle_info(
+        :accept,
+        %__MODULE__{
+          listen_socket: listen_socket,
+          supervisor: supervisor
+        } = state
+      ) do
+    case :gen_tcp.accept(listen_socket, 2000) do
+      {:ok, socket} ->
+        {:ok, pid} = DynamicSupervisor.start_child(supervisor, {Chat.Connection, socket})
+
+        :ok = :gen_tcp.controlling_process(socket, pid)
+        send(self(), :accept)
+        {:noreply, state}
+
+      {:error, :timeout} ->
+        send(self(), :accept)
+        {:noreply, state}
+
+      {:error, reason} ->
+        {:stop, reason, state}
     end
   end
 end
