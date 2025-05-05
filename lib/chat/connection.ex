@@ -5,7 +5,8 @@ defmodule Chat.Connection do
 
   use GenServer, restart: :temporary
 
-  alias Chat.Message.Register
+  alias Chat.Message.{Broadcast, Register}
+  alias Chat.{BroadcastRegistry, UsernameRegistry}
   require Logger
 
   defstruct [:socket, :username, buffer: <<>>]
@@ -31,6 +32,12 @@ defmodule Chat.Connection do
     handle_new_data(state)
   end
 
+  def handle_info({:broadcast, %Broadcast{} = message}, state) do
+    encoded_message = Chat.Protocol.encode_message(message)
+    :ok = :gen_tcp.send(state.socket, encoded_message)
+    {:noreply, state}
+  end
+
   ## Helpers
 
   defp handle_new_data(state) do
@@ -53,11 +60,33 @@ defmodule Chat.Connection do
   end
 
   defp handle_message(%Register{username: username}, %__MODULE__{username: nil} = state) do
+    {:ok, _} = Registry.register(BroadcastRegistry, :broadcast, :no_value)
+    {:ok, _} = Registry.register(UsernameRegistry, username, :no_value)
     {:ok, put_in(state.username, username)}
   end
 
   defp handle_message(%Register{}, _state) do
     Logger.error("Invalid Register message, already registered")
     :error
+  end
+
+  defp handle_message(%Broadcast{}, %__MODULE__{username: nil}) do
+    Logger.error("Invalid Broadcast message, not registered")
+    :error
+  end
+
+  defp handle_message(%Broadcast{} = message, %__MODULE__{username: username} = state) do
+    sender = self()
+    message = %Broadcast{message | from_username: username}
+
+    Registry.dispatch(BroadcastRegistry, :broadcast, fn entries ->
+      Enum.each(entries, fn {pid, _} ->
+        if pid != sender do
+          send(pid, {:broadcast, message})
+        end
+      end)
+    end)
+
+    {:ok, state}
   end
 end
